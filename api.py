@@ -17,12 +17,10 @@ from module import (create_jwt,
                     get_paypal_access_token,
                     get_in_progress_payment,
                     update_payment,
+                    get_user_data,
                     get_subs_data,
                     insert_new_subscription_data,
                     delete_subscription_data)
-from dotenv import load_dotenv
-load_dotenv("./.env")
-
 
 # Define global variables from environment
 CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
@@ -239,8 +237,8 @@ async def google_callback(code: str = None,
         jwt_token = create_jwt(payload)
 
         # Get user's profile data from database and redirect to specific page
-        user_profile_data = await asyncio.to_thread(get_user_profile_data, user["email"])
-        endpoint = "signup-form" if user_profile_data["data"] == "data is not found !" else "user-profile"
+        user_profile_data = await asyncio.to_thread(get_user_data, user["email"])
+        endpoint = "signup" if not user_profile_data else "dashboard"
 
         response = RedirectResponse(url=f"{WEBSITE_URL}/{endpoint}")
 
@@ -259,7 +257,6 @@ async def google_callback(code: str = None,
     except Exception:
         traceback.print_exc()
         HTTPException(status_code=500, detail="Error on google callback")
-
 
 
 @app.post("/logout")
@@ -318,8 +315,8 @@ async def insert_user(json_data: dict,
 
 
 
-@app.post("/get-subscription-data")
-async def get_subscription_data(data: dict,
+@app.get("/get-subscription-data")
+async def get_subscription_data(request: Request,
                                 credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
     """
     
@@ -329,13 +326,13 @@ async def get_subscription_data(data: dict,
         raise HTTPException(status_code=403, detail="Authorization was failed !")
 
     try:
-        # token = request.cookies.get("cookie_session")
-        # data = decode_jwt(token)
-        # if "email" not in data.keys():
-        #     return RedirectResponse(f"{WEBSITE_URL}/login")
+        token = request.cookies.get("cookie_session")
+        cookie_data = decode_jwt(token)
+        if "email" not in cookie_data.keys():
+            return RedirectResponse(f"{WEBSITE_URL}/login")
 
         # Get data from database
-        subscription_data = await asyncio.to_thread(get_subs_data, data["email"])
+        subscription_data = await asyncio.to_thread(get_subs_data, cookie_data["email"])
         return subscription_data
     except:
         traceback.print_exc()

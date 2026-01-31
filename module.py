@@ -1,4 +1,5 @@
 import os
+import re
 import jwt
 import pytz
 import psycopg2
@@ -6,8 +7,7 @@ import requests
 import warnings
 import pandas as pd
 from datetime import datetime, timedelta, timezone
-from dotenv import load_dotenv
-load_dotenv("./.env")
+from dateutil.relativedelta import relativedelta
 
 # Define global variables
 QUERY_DIR_PATH="./queries"
@@ -161,6 +161,22 @@ def get_paypal_access_token():
     return access_token
 
 
+def get_user_data(email: str):
+    warnings.filterwarnings("ignore")
+    connection = postgresql_connect()
+    with open(f"{QUERY_DIR_PATH}/get_user_data.sql", "r") as openfile:
+        query_file = openfile.read()
+        query_file = query_file.replace("@EMAIL", email)
+    
+    df_user = pd.read_sql_query(query_file, connection)
+
+    data = df_user.to_json(orient="records")
+
+    connection.close()
+
+    return data
+
+
 def get_subs_data(user_email: str):
     warnings.filterwarnings("ignore")
     connection = postgresql_connect()
@@ -169,11 +185,16 @@ def get_subs_data(user_email: str):
         query_file = query_file.replace("@USER_EMAIL", str(user_email))
 
     df_user_data = pd.read_sql_query(query_file, connection)
-    df_user_data["subscription_start_date"] = df_user_data["subscription_start_date"].dt.strftime("%d %b %Y")
+    if df_user_data.values.tolist():
+        df_user_data["subscription_start_date"] = df_user_data["subscription_start_date"].dt.strftime("%d %b %Y")
+        df_user_data["subscription_end_date"] = df_user_data["subscription_end_date"].dt.strftime("%d %b %Y")
     list_subscription_data = df_user_data.to_dict(orient="records")
 
     subscription_data = {
-        "data": list_subscription_data
+        "data": {
+            "user_email": user_email,
+            "list_data": list_subscription_data
+        }
     }
 
     connection.close()
@@ -188,11 +209,18 @@ def insert_new_subscription_data(data: dict):
     with open(f"{QUERY_DIR_PATH}/insert_new_subscription.sql", "r") as openfile:
         query_file = openfile.read()
 
+    # Set subscription end date
+    subs_period_int = int(re.sub(r"\smonth", "", data["subscription_period"]))
+    subs_end_date = datetime.strptime(data["subscription_start_date"], "%Y-%m-%d") + relativedelta(months=subs_period_int)
+    subs_end_date_str = subs_end_date.strftime("%Y-%m-%d %H:%M:%S")
+
     values = (
+       data["user_email"],
        data["user_email"],
        data["subscription_name"],
        data["subscription_period"],
-       data["subscription_start_date"]
+       data["subscription_start_date"],
+       subs_end_date_str
     )
 
     cursor.execute(query_file, values)
